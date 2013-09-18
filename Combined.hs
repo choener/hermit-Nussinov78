@@ -80,8 +80,8 @@ gNussinov
 --          left  <<< b % s     |||
 --          right <<<     s % b |||
 --          pair  <<< b % s % b |||
-          split <<<  s' % s'  ... h
---          split <@<  (s', s')  ... h
+--          split <<<  s' % s'  ... h
+          split <@<  (s', s')  ... h
       )
   )  where s' = toNonEmptyT s
 {-# INLINE gNussinov #-}
@@ -413,7 +413,7 @@ instance
   mkStream !(ls:!:MTbl ene tbl) (Inner _ szd) !ij@(Subword (i:.j))
     = SM.concatMapM stepEnum
     $ mkStream ls (Inner NoCheck Nothing) ij where
---      {-# INLINE  stepRead #-}
+      {-# INLINE [0] stepRead #-}
       stepRead (s,l) = let (Subword (_:.k)) = getIdx s
                        in  PA.readM tbl (Z:.subword k l) >>= \z -> return $ ElmMTblSw s z (subword k l)
       -- perform one step in inner stream
@@ -422,20 +422,23 @@ instance
                in return . S.mapM (\l -> PA.readM tbl (Z:.subword k l) >>= \z -> return $ ElmMTblSw s z (subword k l))
                   $ stepEnum s -}
       -- return stream of required indices
---      {-# INLINE  stepEnum #-}
+      {-# INLINE [0] stepEnum #-}
       stepEnum s = let (Subword (_:.l)) = getIdx s
                        le = l + case ene of { EmptyT -> 0 ; NonEmptyT -> 1}
                        l' = le -- case szd of Nothing -> le
                                --          Just z  -> max le (j-z)
                    in return . S.mapM stepRead . S.map (\k -> (s,k)) $ S.enumFromStepN l' 1 (j-l'+1)
 -- #else
+--
 {-
   mkStream !(ls:!:MTbl ene tbl) (Inner _ szd) !ij@(Subword (i:.j)) = S.flatten mk step Unknown $ mkStream ls (Inner NoCheck Nothing) ij where
+    {-# INLINE [0] mk #-}
     mk !s = let (Subword (_:.l)) = getIdx s
                 le = l + case ene of { EmptyT -> 0 ; NonEmptyT -> 1}
                 l' = case szd of Nothing -> le
                                  Just z  -> max le (j-z)
             in return (s :!: l :!: l')
+    {-# INLINE [0] step #-}
     step !(s :!: k :!: l)
       | l > j = return S.Done
       | otherwise = PA.readM tbl (Z:.subword k l) >>= \z -> return $ S.Yield (ElmMTblSw s z (subword k l)) (s :!: k :!: l+1)
@@ -516,19 +519,23 @@ instance
   ( Monad m
   ) => MkStream m Z Subword where
   mkStream Z Outer !(Subword (i:.j)) = S.unfoldr step i where
+    {-# INLINE [0] step #-}
     step !k
       | k==j      = P.Just $ (ElmZ (subword i i), j+1)
       | otherwise = P.Nothing
   mkStream Z (Inner NoCheck Nothing)  !(Subword (i:.j)) = S.singleton $ ElmZ $ subword i i
   mkStream Z (Inner NoCheck (Just z)) !(Subword (i:.j)) = S.unfoldr step i where
+    {-# INLINE [0] step #-}
     step !k
       | k<=j && k+z>=j = P.Just $ (ElmZ (subword i i), j+1)
       | otherwise      = P.Nothing
   mkStream Z (Inner Check Nothing)   !(Subword (i:.j)) = S.unfoldr step i where
+    {-# INLINE [0] step #-}
     step !k
       | k<=j      = P.Just $ (ElmZ (subword i i), j+1)
       | otherwise = P.Nothing
   mkStream Z (Inner Check (Just z)) !(Subword (i:.j)) = S.unfoldr step i where
+    {-# INLINE [0] step #-}
     step !k
       | k<=j && k+z>=j = P.Just $ (ElmZ (subword i i), j+1)
       | otherwise      = P.Nothing
@@ -551,17 +558,17 @@ infixl 8 <@<
     MTbl _ !tbla = a
     MTbl _ !tblb = b
     getArg' (ElmMTblSw (ElmMTblSw (ElmZ _) z1 _) z2 _) = (Z:.z1:.z2)
-    {-# INLINE getArg' #-}
+    {-# INLINE [0] getArg' #-}
     outerRead !s = do let (Subword (_:.l)) = getIdx s
                       z <- PA.readM tbla (Z:.subword l j)
                       return $ ElmMTblSw s z (subword l j)
-    {-# INLINE outerRead #-}
+    {-# INLINE [0] outerRead #-}
     stepRead (!s,!l) = let (Subword (_:.(!k))) = getIdx s
                        in  PA.readM tblb (Z:.subword k l) >>= \z -> return $ ElmMTblSw s z (subword k l)
-    {-# INLINE stepRead #-}
+    {-# INLINE [0] stepRead #-}
     stepEnum !s = let (Subword (_:.l)) = getIdx s
                       l' = l + 1
                   in return . S.mapM stepRead . S.map (\(!k) -> (s,k)) $ S.enumFromStepN l' 1 (j-l')
-    {-# INLINE stepEnum #-}
+    {-# INLINE [0] stepEnum #-}
 {-# INLINE (<@<) #-}
 
