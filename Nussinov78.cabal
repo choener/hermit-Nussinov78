@@ -29,7 +29,8 @@ executable Nussinov78
     hermit >= 0.2.1 ,
     ghc ,
     strict ,
-    repa
+    repa ,
+    hermit-streamfusion
   main-is:
     Combined.hs
   other-modules:
@@ -39,6 +40,13 @@ executable Nussinov78
     -fllvm
 --    -optlo-O3 -optlo-std-compile-opts
 
+executable Tests
+  build-depends:
+  main-is:
+    Tests.hs
+  ghc-options:
+    -O2
+    -fllvm
 
 
 --  source-repository head

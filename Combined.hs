@@ -28,7 +28,7 @@ import Control.Monad.ST
 import Data.Char (toUpper, ord)
 import Data.Primitive
 --import Data.Vector.Fusion.Stream as S
-import Data.Vector.Fusion.Stream.Monadic as S
+--import Data.Vector.Fusion.Stream.Monadic as S
 import Data.Vector.Fusion.Stream.Monadic as SM
 import Data.Vector.Fusion.Stream.Size
 import Data.Vector.Fusion.Util
@@ -76,12 +76,15 @@ gNussinov
   (e :: Empty)
   =
   ( s, (
---          empty <<< e         |||
---          left  <<< b % s     |||
---          right <<<     s % b |||
---          pair  <<< b % s % b |||
---          split <<<  s' % s'  ... h
-          split <@<  (s', s')  ... h
+          empty <<< e         |||
+          left  <<< b % s     |||
+          right <<<     s % b |||
+          pair  <<< b % s % b |||
+          split <<<  s' % s'  ... h
+--          split <<<  s % s  ... h
+--            (apping split ( s , s)) ... h
+--          zzzfun split (s', s') ... h
+--          zzzfun split (s, s) ... h
       )
   )  where s' = toNonEmptyT s
 {-# INLINE gNussinov #-}
@@ -160,7 +163,8 @@ nussinov78Fill inp = do
   freeze t'
 {-# NOINLINE nussinov78Fill #-}
 
-fillTable :: PrimMonad m => (MTbl Subword (PA.MutArr m (PA.Unboxed (Z:.Subword) Int)), (Subword -> m Int)) -> m ()
+--fillTable :: PrimMonad m => (MTbl Subword (PA.MutArr m (PA.Unboxed (Z:.Subword) Int)), (Subword -> m Int)) -> m ()
+fillTable :: (MTbl Subword (PA.MutArr (ST s) (PA.Unboxed (Z:.Subword) Int)), (Subword -> ST s Int)) -> ST s ()
 fillTable (MTbl _ tbl, f) = do
   let (_,Z:.Subword (0:.n)) = boundsM tbl
   forM_ [n,n-1..0] $ \i -> forM_ [i..n] $ \j -> do
@@ -192,8 +196,12 @@ doGAPlike k inp = do
 
 
 infixl 8 <<<
-(<<<) f xs = \ij -> outerCheck (checkValidIndex (build xs) ij) . S.map (apply (inline f) . getArg) . mkStream (build xs) (outer ij) $ ij
+-- (<<<) f xs = \ij -> {- outerCheck (checkValidIndex (build xs) ij) . -} SM.map (apply (inline f) . getArg) . mkStream (build xs) (outer ij) $ ij
+(<<<) f xs ij = SM.map (apply f . getArg) . mkStream (build xs) (outer ij) $ ij
 {-# INLINE (<<<) #-}
+
+apping f (x,y) = SM.map (apply (inline f) . getArg) . mkStream (Z:!:x:!:y) Outer
+{-# INLINE apping #-}
 
 infixl 5 ...
 (...) s h = h . s
@@ -249,30 +257,30 @@ instance Apply (Z:.a:.b:.c -> res) where
   apply fun (Z:.a:.b:.c) = fun a b c
   {-# INLINE apply #-}
 
-checkValidIndex x i = validIndex x (getParserRange x i) i
-{-# INLINE checkValidIndex #-}
+--checkValidIndex x i = validIndex x (getParserRange x i) i
+--{-# INLINE checkValidIndex #-}
 
-class (Index i) => ValidIndex x i where
-  validIndex :: x -> ParserRange i -> i -> Bool
-  getParserRange :: x -> i -> ParserRange i
+--class (Index i) => ValidIndex x i where
+--  validIndex :: x -> ParserRange i -> i -> Bool
+--  getParserRange :: x -> i -> ParserRange i
 
 -- | 'outerCheck' acts as a static filter. If 'b' is true, we keep all stream
 -- elements. If 'b' is false, we discard all stream elements.
 
-outerCheck :: Monad m => Bool -> SM.Stream m a -> SM.Stream m a
-outerCheck b (SM.Stream step sS n) = b `seq` SM.Stream snew (Left (b,sS)) Unknown where
-  {-# INLINE [1] snew #-}
-  snew (Left  (False,s)) = return $ S.Done
-  snew (Left  (True ,s)) = return $ S.Skip (Right s)
-  snew (Right s        ) = do r <- step s
-                              case r of
-                                S.Yield x s' -> return $ S.Yield x (Right s')
-                                S.Skip    s' -> return $ S.Skip    (Right s')
-                                S.Done       -> return $ S.Done
-{-# INLINE outerCheck #-}
+--outerCheck :: Monad m => Bool -> SM.Stream m a -> SM.Stream m a
+--outerCheck b (SM.Stream step sS n) = b `seq` SM.Stream snew (Left (b,sS)) Unknown where
+--  {-# INLINE [1] snew #-}
+--  snew (Left  (False,s)) = return $ SM.Done
+--  snew (Left  (True ,s)) = return $ SM.Skip (Right s)
+--  snew (Right s        ) = do r <- step s
+--                              case r of
+--                                SM.Yield x s' -> return $ SM.Yield x (Right s')
+--                                SM.Skip    s' -> return $ SM.Skip    (Right s')
+--                                SM.Done       -> return $ SM.Done
+--{-# INLINE outerCheck #-}
 
 infixl 7 |||
-(|||) xs ys = \ij -> xs ij S.++ ys ij
+(|||) xs ys = \ij -> xs ij SM.++ ys ij
 {-# INLINE (|||) #-}
 
 class EmptyTable x where
@@ -296,15 +304,15 @@ data GChr r x = GChr !(VU.Vector x -> Int -> r) !(VU.Vector x)
 
 instance Build (GChr r x)
 
-instance
-  ( ValidIndex ls Subword
-  , VU.Unbox x
-  ) => ValidIndex (ls :!: GChr r x) Subword where
-    validIndex (ls :!: GChr _ xs) abc@(a:!:b:!:c) ij@(Subword (i:.j)) =
-      i>=a && j<=VU.length xs -c && i+b<=j && validIndex ls abc ij
-    {-# INLINE validIndex #-}
-    getParserRange (ls :!: GChr _ _) ix = let (a:!:b:!:c) = getParserRange ls ix in (a:!:b+1:!:max 0 (c-1))
-    {-# INLINE getParserRange #-}
+--instance
+--  ( ValidIndex ls Subword
+--  , VU.Unbox x
+--  ) => ValidIndex (ls :!: GChr r x) Subword where
+--    validIndex (ls :!: GChr _ xs) abc@(a:!:b:!:c) ij@(Subword (i:.j)) =
+--      i>=a && j<=VU.length xs -c && i+b<=j && validIndex ls abc ij
+--    {-# INLINE validIndex #-}
+--    getParserRange (ls :!: GChr _ _) ix = let (a:!:b:!:c) = getParserRange ls ix in (a:!:b+1:!:max 0 (c-1))
+--    {-# INLINE getParserRange #-}
 
 instance
   ( Elms ls Subword
@@ -324,9 +332,9 @@ instance
   ) => MkStream m (ls :!: GChr r x) Subword where
   mkStream !(ls :!: GChr f xs) Outer !ij@(Subword (i:.j)) =
     let dta = f xs (j-1)
-    in  dta `seq` S.map (\s -> ElmGChr s dta (subword (j-1) j)) $ mkStream ls Outer (subword i $ j-1)
+    in  dta `seq` SM.map (\s -> ElmGChr s dta (subword (j-1) j)) $ mkStream ls Outer (subword i $ j-1)
   mkStream !(ls :!: GChr f xs) (Inner cnc szd) !ij@(Subword (i:.j))
-    = S.map (\s -> let Subword (k:.l) = getIdx s
+    = SM.map (\s -> let Subword (k:.l) = getIdx s
                    in  ElmGChr s (f xs l) (subword l $ l+1)
             )
     $ mkStream ls (Inner cnc szd) (subword i $ j-1)
@@ -337,11 +345,11 @@ data Empty = Empty
 empty = Empty
 {-# INLINE empty #-}
 
-instance
-  ( ValidIndex ls Subword
-  ) => ValidIndex (ls :!: Empty) Subword where
-    validIndex (ls:!:Empty) abc ij@(Subword (i:.j)) = i==j && validIndex ls abc ij
-    {-# INLINE validIndex #-}
+--instance
+--  ( ValidIndex ls Subword
+--  ) => ValidIndex (ls :!: Empty) Subword where
+--    validIndex (ls:!:Empty) abc ij@(Subword (i:.j)) = i==j && validIndex ls abc ij
+--    {-# INLINE validIndex #-}
 
 instance Build Empty
 
@@ -361,8 +369,8 @@ instance
   , MkStream m ls Subword
   ) => MkStream m (ls:!:Empty) Subword where
   mkStream !(ls:!:Empty) Outer !ij@(Subword (i:.j))
-    = S.map (\s -> ElmEmpty s () (subword i j))
-    $ S.filter (\_ -> i==j)
+    = SM.map (\s -> ElmEmpty s () (subword i j))
+    $ SM.filter (\_ -> i==j)
     $ mkStream ls Outer ij
   {-# INLINE mkStream #-}
 
@@ -374,24 +382,24 @@ mTblSw = MTbl
 
 instance Build (MTbl i x)
 
-instance
-  ( ValidIndex ls Subword
-  , Monad m
-  , PA.MPrimArrayOps arr (Z:.Subword) x
-  ) => ValidIndex (ls:!:MTbl Subword (PA.MutArr m (arr (Z:.Subword) x))) Subword where
-  validIndex (_  :!: MTbl ZeroT _) _ _ = error "table with ZeroT found, there is no reason (actually: no implementation) for 1-dim ZeroT tables"
-  validIndex (ls :!: MTbl ene tbl) abc@(a:!:b:!:c) ij@(Subword (i:.j)) =
-    let (_,Z:.Subword (0:.n)) = PA.boundsM tbl
-        minsize = max b (if ene==EmptyT then 0 else 1)
-    in  i>=a && i+minsize<=j && j<=n-c && validIndex ls abc ij
-  {-# INLINE validIndex #-}
-  getParserRange (ls :!: MTbl ene _) ix = let (a:!:b:!:c) = getParserRange ls ix in if ene==EmptyT then (a:!:b:!:c) else (a:!:b+1:!:c)
-  {-# INLINE getParserRange #-}
+--instance
+--  ( ValidIndex ls Subword
+--  , Monad m
+--  , PA.MPrimArrayOps arr (Z:.Subword) x
+--  ) => ValidIndex (ls:!:MTbl Subword (PA.MutArr m (arr (Z:.Subword) x))) Subword where
+--  validIndex (_  :!: MTbl ZeroT _) _ _ = error "table with ZeroT found, there is no reason (actually: no implementation) for 1-dim ZeroT tables"
+--  validIndex (ls :!: MTbl ene tbl) abc@(a:!:b:!:c) ij@(Subword (i:.j)) =
+--    let (_,Z:.Subword (0:.n)) = PA.boundsM tbl
+--        minsize = max b (if ene==EmptyT then 0 else 1)
+--    in  i>=a && i+minsize<=j && j<=n-c && validIndex ls abc ij
+--  {-# INLINE validIndex #-}
+--  getParserRange (ls :!: MTbl ene _) ix = let (a:!:b:!:c) = getParserRange ls ix in if ene==EmptyT then (a:!:b:!:c) else (a:!:b+1:!:c)
+--  {-# INLINE getParserRange #-}
 
 instance
   ( Elms ls Subword
   ) => Elms (ls :!: MTbl Subword (PA.MutArr m (arr (Z:.Subword) x))) Subword where
-  data Elm (ls :!: MTbl Subword (PA.MutArr m (arr (Z:.Subword) x))) Subword = ElmMTblSw !(Elm ls Subword) !x !Subword -- ElmBtTbl !(Elm ls Subword) !x !(m (S.Stream m b)) !Subword
+  data Elm (ls :!: MTbl Subword (PA.MutArr m (arr (Z:.Subword) x))) Subword = ElmMTblSw !(Elm ls Subword) !x !Subword -- ElmBtTbl !(Elm ls Subword) !x !(m (SM.Stream m b)) !Subword
   type Arg (ls :!: MTbl Subword (PA.MutArr m (arr (Z:.Subword) x))) = Arg ls :. x
   getArg !(ElmMTblSw ls x _) = getArg ls :. x
   getIdx !(ElmMTblSw _  _ i) = i
@@ -406,32 +414,32 @@ instance
   , PA.MPrimArrayOps arr (Z:.Subword) x
   ) => MkStream m (ls :!: MTbl Subword (PA.MutArr m (arr (Z:.Subword) x))) Subword where
   mkStream !(ls:!:MTbl ene tbl) Outer !ij@(Subword (i:.j))
-    = S.mapM (\s -> let (Subword (_:.l)) = getIdx s in PA.readM tbl (Z:.subword l j) >>= \z -> return $ ElmMTblSw s z (subword l j))
+    = SM.mapM (\s -> let (Subword (_:.l)) = getIdx s in PA.readM tbl (Z:.subword l j) >>= \z -> return $ ElmMTblSw s z (subword l j))
     $ mkStream ls (Inner Check Nothing) (subword i $ case ene of { EmptyT -> j ; NonEmptyT -> j-1 })
 -- #ifdef HERMIT_CONCATMAP
 --
   mkStream !(ls:!:MTbl ene tbl) (Inner _ szd) !ij@(Subword (i:.j))
-    = SM.concatMapM stepEnum
+    = SM.concatMap stepEnum
     $ mkStream ls (Inner NoCheck Nothing) ij where
-      {-# INLINE [0] stepRead #-}
+      {-# INLINE stepRead #-}
       stepRead (s,l) = let (Subword (_:.k)) = getIdx s
                        in  PA.readM tbl (Z:.subword k l) >>= \z -> return $ ElmMTblSw s z (subword k l)
       -- perform one step in inner stream
       {-
       step s = let (Subword (_:.k)) = getIdx s
-               in return . S.mapM (\l -> PA.readM tbl (Z:.subword k l) >>= \z -> return $ ElmMTblSw s z (subword k l))
+               in return . SM.mapM (\l -> PA.readM tbl (Z:.subword k l) >>= \z -> return $ ElmMTblSw s z (subword k l))
                   $ stepEnum s -}
       -- return stream of required indices
-      {-# INLINE [0] stepEnum #-}
+      {-# INLINE stepEnum #-}
       stepEnum s = let (Subword (_:.l)) = getIdx s
                        le = l + case ene of { EmptyT -> 0 ; NonEmptyT -> 1}
                        l' = le -- case szd of Nothing -> le
                                --          Just z  -> max le (j-z)
-                   in return . S.mapM stepRead . S.map (\k -> (s,k)) $ S.enumFromStepN l' 1 (j-l'+1)
+                   in SM.mapM stepRead . SM.map (\k -> (s,k)) $ SM.enumFromStepN l' 1 (j-l'+1)
 -- #else
 --
 {-
-  mkStream !(ls:!:MTbl ene tbl) (Inner _ szd) !ij@(Subword (i:.j)) = S.flatten mk step Unknown $ mkStream ls (Inner NoCheck Nothing) ij where
+  mkStream !(ls:!:MTbl ene tbl) (Inner _ szd) !ij@(Subword (i:.j)) = SM.flatten mk step Unknown $ mkStream ls (Inner NoCheck Nothing) ij where
     {-# INLINE [0] mk #-}
     mk !s = let (Subword (_:.l)) = getIdx s
                 le = l + case ene of { EmptyT -> 0 ; NonEmptyT -> 1}
@@ -440,8 +448,8 @@ instance
             in return (s :!: l :!: l')
     {-# INLINE [0] step #-}
     step !(s :!: k :!: l)
-      | l > j = return S.Done
-      | otherwise = PA.readM tbl (Z:.subword k l) >>= \z -> return $ S.Yield (ElmMTblSw s z (subword k l)) (s :!: k :!: l+1)
+      | l > j = return SM.Done
+      | otherwise = PA.readM tbl (Z:.subword k l) >>= \z -> return $ SM.Yield (ElmMTblSw s z (subword k l)) (s :!: k :!: l+1)
 -- #endif
 -}
   {-# INLINE mkStream #-}
@@ -489,11 +497,11 @@ instance Build x => Build (x:!:y) where
   build (x:!:y) = build x :!: y
   {-# INLINE build #-}
 
-instance ValidIndex Z Subword where
-  {-# INLINE validIndex #-}
-  {-# INLINE getParserRange #-}
-  validIndex _ _ _ = True
-  getParserRange _ _ = (0 :!: 0 :!: 0)
+--instance ValidIndex Z Subword where
+--  {-# INLINE validIndex #-}
+--  {-# INLINE getParserRange #-}
+--  validIndex _ _ _ = True
+--  getParserRange _ _ = (0 :!: 0 :!: 0)
 
 
 instance Apply (Z:.a:.b:.c:.d -> res) where
@@ -512,63 +520,76 @@ instance
   {-# INLINE getIdx #-}
 
 instance Monad m => MkStream m Z Z where
-  mkStream _ _ _ = S.singleton (ElmZ Z)
+  mkStream _ _ _ = SM.singleton (ElmZ Z)
   {-# INLINE mkStream #-}
 
 instance
   ( Monad m
   ) => MkStream m Z Subword where
-  mkStream Z Outer !(Subword (i:.j)) = S.unfoldr step i where
+  mkStream Z Outer !(Subword (i:.j)) = SM.unfoldr step i where
     {-# INLINE [0] step #-}
     step !k
       | k==j      = P.Just $ (ElmZ (subword i i), j+1)
       | otherwise = P.Nothing
-  mkStream Z (Inner NoCheck Nothing)  !(Subword (i:.j)) = S.singleton $ ElmZ $ subword i i
-  mkStream Z (Inner NoCheck (Just z)) !(Subword (i:.j)) = S.unfoldr step i where
+  mkStream Z (Inner NoCheck Nothing)  !(Subword (i:.j)) = SM.singleton $ ElmZ $ subword i i
+  mkStream Z (Inner NoCheck (Just z)) !(Subword (i:.j)) = SM.unfoldr step i where
     {-# INLINE [0] step #-}
     step !k
       | k<=j && k+z>=j = P.Just $ (ElmZ (subword i i), j+1)
       | otherwise      = P.Nothing
-  mkStream Z (Inner Check Nothing)   !(Subword (i:.j)) = S.unfoldr step i where
+  mkStream Z (Inner Check Nothing)   !(Subword (i:.j)) = SM.unfoldr step i where
     {-# INLINE [0] step #-}
     step !k
       | k<=j      = P.Just $ (ElmZ (subword i i), j+1)
       | otherwise = P.Nothing
-  mkStream Z (Inner Check (Just z)) !(Subword (i:.j)) = S.unfoldr step i where
+  mkStream Z (Inner Check (Just z)) !(Subword (i:.j)) = SM.unfoldr step i where
     {-# INLINE [0] step #-}
     step !k
       | k<=j && k+z>=j = P.Just $ (ElmZ (subword i i), j+1)
       | otherwise      = P.Nothing
   {-# INLINE mkStream #-}
 
+{-
 infixl 8 <@<
-(<@<) :: (Int -> Int -> Int)
+(<@<) = zzzfun
+{-# NOINLINE (<@<) #-}
+-}
+
+--
+--infixl 8 `zzzfun`
+zzzfun :: (Int -> Int -> Int)
       -> ( MTbl Subword (PA.MutArr (ST s) (PA.Unboxed (Z:.Subword) Int))
          , MTbl Subword (PA.MutArr (ST s) (PA.Unboxed (Z:.Subword) Int))
          )
       -> Subword
       -> SM.Stream (ST s) Int
-(<@<) f !(!a,!b) !ij@(Subword((!i):.(!j)))
-  = S.map (apply (inline f) . getArg')
-  . S.mapM outerRead
-  . SM.concatMapM stepEnum
-  $ SM.singleton (ElmZ $ subword i i)
+-- (<@<) f !(!a,!b) !ij@(Subword((!i):.(!j)))
+zzzfun f !(!a,!b) (Subword((!i):.(!j)))
+  = SM.map (apply (inline f) . getArg')
+  $ SM.mapM outerRead
+  $ SM.concatMap stepEnum              -- can I assume that some form of eradication of concatmap/singleton happens? (no it doesn't, below in test everything works!)
+  -- $ SM.singleton (ElmZ $ subword i i)
+  $ SM.map (\k -> ElmZ $ subword k k)
+  $ SM.enumFromStepN i 1 1
   where
-    Subword (i:.j) = ij
+--    Subword (i:.j) = ij
     MTbl _ !tbla = a
     MTbl _ !tblb = b
     getArg' (ElmMTblSw (ElmMTblSw (ElmZ _) z1 _) z2 _) = (Z:.z1:.z2)
-    {-# INLINE [0] getArg' #-}
+    {-# INLINE  getArg' #-}
     outerRead !s = do let (Subword (_:.l)) = getIdx s
                       z <- PA.readM tbla (Z:.subword l j)
                       return $ ElmMTblSw s z (subword l j)
-    {-# INLINE [0] outerRead #-}
-    stepRead (!s,!l) = let (Subword (_:.(!k))) = getIdx s
-                       in  PA.readM tblb (Z:.subword k l) >>= \z -> return $ ElmMTblSw s z (subword k l)
-    {-# INLINE [0] stepRead #-}
+    {-# INLINE  outerRead #-}
+    stepRead ((!s) :. (!l)) = let (Subword (_:.(!k))) = getIdx s
+                              in  PA.readM tblb (Z:.subword k l) >>= \z -> return $ ElmMTblSw s z (subword k l)
+    {-# INLINE  stepRead #-}
+    -- concatMapM / return . SM.mapM doesn't work
+    -- concatMap / SM.mapM works ?!
     stepEnum !s = let (Subword (_:.l)) = getIdx s
                       l' = l + 1
-                  in return . S.mapM stepRead . S.map (\(!k) -> (s,k)) $ S.enumFromStepN l' 1 (j-l')
-    {-# INLINE [0] stepEnum #-}
-{-# INLINE (<@<) #-}
+                  in SM.mapM stepRead . SM.map (\(!k) -> (s :. k)) $ SM.enumFromStepN l' 1 (j-l')
+    {-# INLINE  stepEnum #-}
+{-# INLINE zzzfun #-}
+--
 
