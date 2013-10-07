@@ -22,15 +22,15 @@ executable Nussinov78
   build-depends:
     base >= 4 && < 5,
     mtl            >= 2,
-    primitive      == 0.5.*   ,
-    vector         == 0.11.*  ,
-    PrimitiveArray == 0.5.1.0 ,
+    primitive      >= 0.5   ,
+    vector          ,
+    PrimitiveArray >= 0.5.1.0 ,
     ghc-prim ,
     hermit >= 0.2.1 ,
     ghc ,
     strict ,
     repa ,
-    hermit-streamfusion
+    hermit-adpfusion
   main-is:
     Combined.hs
   other-modules:

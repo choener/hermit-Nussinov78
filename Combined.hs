@@ -54,7 +54,7 @@ import Debug.Trace
 import Control.Arrow (second)
 import System.IO.Unsafe
 
-import HERMIT.Optimization.StreamFusion.Vector
+import HERMIT.Optimization.StreamFusion.ADPfusion
 
 -- The signature
 
@@ -69,7 +69,7 @@ type Signature m a r =
 
 -- the grammar
 
-gNussinov
+grammarFun
   ((empty,left,right,pair,split,h) :: Signature (ST s) Int Int)
   s
   (b :: GChr Char Char)
@@ -87,7 +87,7 @@ gNussinov
 --          zzzfun split (s, s) ... h
       )
   )  where s' = toNonEmptyT s
-{-# INLINE gNussinov #-}
+{-# INLINE grammarFun #-}
 
 -- pairmax algebra
 
@@ -142,14 +142,14 @@ nussinov78 inp = (arr ! (Z:.subword 0 n),bt) where
   (_,Z:.Subword (_:.n)) = bounds arr
   len  = P.length inp
   vinp = VU.fromList . P.map toUpper $ inp
-  arr  = runST (nussinov78Fill $ vinp)
+  arr  = runST (forwardFun vinp)
   bt   = {- backtrack vinp arr -- -} [] :: [String] -- backtrack vinp arr
 {-# NOINLINE nussinov78 #-}
 
 
 --nussinov78Fill :: forall s . VU.Vector Char -> ST s (Z.U (Z:.Subword) Int)
-nussinov78Fill :: VU.Vector Char -> ST s (PA.Unboxed (Z:.Subword) Int)
-nussinov78Fill inp = do
+forwardFun :: VU.Vector Char -> ST s (PA.Unboxed (Z:.Subword) Int)
+forwardFun inp = do
   let n = VU.length inp
   !t' <- newWithM (Z:.subword 0 0) (Z:.subword 0 n) 0 -- fromAssocsM (Z:.subword 0 0) (Z:.subword 0 n) 0 []
   let t = mTblSw EmptyT t'
@@ -158,19 +158,19 @@ nussinov78Fill inp = do
       {-# INLINE b #-}
   let e = Empty
       {-# INLINE e #-}
-  fillTable $ gNussinov aPairmax t b e
+  fillFun $ grammarFun aPairmax t b e
 --  upperTriS (Z:.gNussinov aPairmax t b e)
   freeze t'
-{-# NOINLINE nussinov78Fill #-}
+{-# NOINLINE forwardFun #-}
 
 --fillTable :: PrimMonad m => (MTbl Subword (PA.MutArr m (PA.Unboxed (Z:.Subword) Int)), (Subword -> m Int)) -> m ()
-fillTable :: (MTbl Subword (PA.MutArr (ST s) (PA.Unboxed (Z:.Subword) Int)), (Subword -> ST s Int)) -> ST s ()
-fillTable (MTbl _ tbl, f) = do
+fillFun :: (MTbl Subword (PA.MutArr (ST s) (PA.Unboxed (Z:.Subword) Int)), (Subword -> ST s Int)) -> ST s ()
+fillFun (MTbl _ tbl, f) = do
   let (_,Z:.Subword (0:.n)) = boundsM tbl
   forM_ [n,n-1..0] $ \i -> forM_ [i..n] $ \j -> do
     v <- (f $ subword i j)
     v `seq` writeM tbl (Z:.subword i j) v
-{-# INLINE fillTable #-}
+{-# INLINE fillFun #-}
 
 
 
